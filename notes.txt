@@ -1,0 +1,33 @@
+
+two-level priorities
+
+global, fixed
+per-unit work
+
+load
+	load_priority
+	last_served
+	unmet_demand[time t]: work (power, time), deadline, load_priority, class (urgent or best effort)
+	allocated[time t]: watts (extends into future)
+
+supply
+	supply[time t]: watts
+
+allocation:
+	allocated[time t]: load i, watts
+
+	algorithm:	
+		allocate all the important work in order of decreasing load priority
+			for loads with multiple levels of operation, allocate lowest level, then iterate at end
+		allocate all of the best effort work in order of decreasing load priority
+
+???: how to incorporate prediction?
+	
+
+status
+	DO_NOT_DEFER = 0 (hard deadline imminent)
+	DEFER_LAST = 1 (soft deadline imminent)
+	DEFER_FIRST = 2 (no deadline imminent)
+
+list of loads sorted by class, then priority
+remove from list if fully satisfied, otherwise flag that can be moved up a level
