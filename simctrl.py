@@ -30,49 +30,76 @@ class Demand():
     def __str__(self):
         return ''.join(["(origin:", str(self.origin), ", work:", str(self.work), ", deadline:", str(self.deadline), ", class:", str(self.cls), ")"])  
 
+class DummySupply():
+
+    def supply(now):
+        return random.random() * 1000.0
+
+class _LoadIntensity():
+    VERYLOW = .1
+    LOW = .25
+    MEDIUM = .5
+    HIGH = .75
+    VERYHIGH = .9
+
+class _LoadMagnitude():
+    VERYLOW = .1
+    LOW = .25
+    MEDIUM = .5
+    HIGH = .75
+    VERYHIGH = .9
+
+class _LoadIntertia():
+    VERYLOW = .1
+    LOW = .25
+    MEDIUM = .5
+    HIGH = .75
+    VERYHIGH = .9
+
 class DummyLoad():
-   
+    
     max_power = 1000.0          # watts
     max_duration = 3.0 * 60.0   # minutes  
     sim_end = 24.0 * 60.0       # minutes
-
-    def __init__(self, type, priority, inertia):
+   
+    def __init__(self, type, priority, inertia, intensity, magnitude):
         self.type = type
         self.priority = priority
-        self.inertia = inertia  # [0,1]
-        self.last_demand_set = False
+        self.inertia = inertia  # in [0,1]
+        self.intensity = intensity # in [0,1]
         self.last_demand = None
         # determines how 'flat' the workload is
 
     def demand(self, now):
+ 
+        # there may be no demand
+        flip = random.random()
+        if (flip > self.intensity):
+            return None
 
-        if (self.last_demand_set):
-            # same demand as last time
-            flip = random.random()
-            if (flip < self.inertia):
-                demand = self.last_demand
-                return demand
+        # the demand may be the same as before
+        flip = random.random()
+        if (flip < self.inertia):
+            demand = self.last_demand
+            return demand
         
-        # choose the work
-        # (alpha = 2, beta = 5)
-        # (using the beta distribution for sound scientific reasons </sarcasm>) 
-        power = DummyLoad.max_power * random.betavariate(2, 5)
-        duration = DummyLoad.max_duration * random.betavariate(2, 5)
-        work = Work(power, duration)
-        
-        # choose the deadline
+        # else choose the work and the deadline with betavariate(alpha = 2, beta = 5)
+        # assume interactive at first
+        power = DummyLoad.max_power * self.magnitude * random.betavariate(2, 5)
+        duration = 1
         deadline = now + duration
-        if (self.type == 'batch'):
+        if (self.type == 'batch'): 
+            duration = DummyLoad.max_duration * random.betavariate(2, 5)
             slack = DummyLoad.sim_end * random.betavariate(2, 5)
             deadline = duration + slack
+        work = Work(power, duration)
         
         # choose the class
         random.shuffle(Class.classes)
         cls = Class.classes[0]
 
-        # create demand
+        # return the demand
         demand = Demand(self, work, deadline, cls)
-        self.last_demand_set = True
         self.last_demand = demand
         return demand
 
@@ -84,7 +111,7 @@ def allocate(loads, supply):
         
     return allocations
 
-def simulate(loads, supplies):
+def simulate(loads, supplies, end):
 
     done = False
     now = 0
@@ -92,7 +119,7 @@ def simulate(loads, supplies):
     preallocated = {}
     preallocated[now] = 0.0
 
-    while (not done):
+    while (now <= end):
 
         # don't need to store allocations for times that have already passed
         tmp = {}
@@ -134,10 +161,20 @@ def simulate(loads, supplies):
 
 if __name__ == "__main__":
 
-    sys.exit() 
     # check arguments
     # for now hard code loads and sources
     # later read in from configuration file
     # each supply / demand should be able to scale avg and max
 
+    a = DummyLoad('interactive', 10, _LoadInertia.VERYHIGH, _LoadIntensity.HIGH, _LoadMagnitude.LOW)
+    b = DummyLoad('interactive', 5, _LoadInertia.VERYLOW, _LoadIntensity.VERYHIGH, _LoadMagnitude.VERYLOW) 
+    c = DummyLoad('batch', 5, _LoadInertia.MED, _LoadIntensity.MED, _LoadMagnitude.MED)
+    d = DummyLoad('batch', 1, _LoadInertia.VERYHIGH, _LoadIntensity.VERYLOW, _LoadMagnitude.VERYHIGH)
+    e = DummyLoad('batch', 2, _LoadInertia.VERYLOW, _LoadIntensity.VERYHIGH, _LoadMagnitude.VERYLOW)
+
+    z = DummySupply()
+
+    loads = [a, b, c, d, e]
+    supplies = [z]
     
+    simulate(loads, supplies, 24*60.0)
