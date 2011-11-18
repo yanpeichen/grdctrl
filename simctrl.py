@@ -4,115 +4,74 @@ import heapq
 import random
 import sys
 
+from dummyload import *
+
+OUTPUT = False
 STEP = 1
 
-class Work:
-    def __init__(self, power, time):
-        self.power = power
-        self.time = time
-
-    def __str__(self):
-        return ''.join(["[power:", str(self.power), ", duration:",  str(self.time), "]"])
-
-class Class():
-    DO_NOT_DELAY = 0
-    DELAY_LAST = 1
-    DELAY_FIRST = 2
-    classes = [1, 2, 3]
-
-class Demand():
-    def __init__(self, origin, work, deadline, cls):
-        self.origin = origin
-        self.work = work
-        self.deadline = deadline
-        self.cls = cls
-
-    def __str__(self):
-        return ''.join(["(origin:", str(self.origin), ", work:", str(self.work), ", deadline:", str(self.deadline), ", class:", str(self.cls), ")"])  
-
-class DummySupply():
-
-    def supply(now):
-        return random.random() * 1000.0
-
-class _LoadIntensity():
-    VERYLOW = .1
-    LOW = .25
-    MEDIUM = .5
-    HIGH = .75
-    VERYHIGH = .9
-
-class _LoadMagnitude():
-    VERYLOW = .1
-    LOW = .25
-    MEDIUM = .5
-    HIGH = .75
-    VERYHIGH = .9
-
-class _LoadIntertia():
-    VERYLOW = .1
-    LOW = .25
-    MEDIUM = .5
-    HIGH = .75
-    VERYHIGH = .9
-
-class DummyLoad():
-    
-    max_power = 1000.0          # watts
-    max_duration = 3.0 * 60.0   # minutes  
-    sim_end = 24.0 * 60.0       # minutes
-   
-    def __init__(self, type, priority, inertia, intensity, magnitude):
-        self.type = type
-        self.priority = priority
-        self.inertia = inertia  # in [0,1]
-        self.intensity = intensity # in [0,1]
-        self.last_demand = None
-        # determines how 'flat' the workload is
-
-    def demand(self, now):
- 
-        # there may be no demand
-        flip = random.random()
-        if (flip > self.intensity):
-            return None
-
-        # the demand may be the same as before
-        flip = random.random()
-        if (flip < self.inertia):
-            demand = self.last_demand
-            return demand
-        
-        # else choose the work and the deadline with betavariate(alpha = 2, beta = 5)
-        # assume interactive at first
-        power = DummyLoad.max_power * self.magnitude * random.betavariate(2, 5)
-        duration = 1
-        deadline = now + duration
-        if (self.type == 'batch'): 
-            duration = DummyLoad.max_duration * random.betavariate(2, 5)
-            slack = DummyLoad.sim_end * random.betavariate(2, 5)
-            deadline = duration + slack
-        work = Work(power, duration)
-        
-        # choose the class
-        random.shuffle(Class.classes)
-        cls = Class.classes[0]
-
-        # return the demand
-        demand = Demand(self, work, deadline, cls)
-        self.last_demand = demand
-        return demand
-
-def allocate(loads, supply):
+def allocate(demands, supply):
+    # sort by class, deadline, type_priority
+    total_allocated = 0.0
+    supply_left = True
     allocations = {}
-    # allocations[time] = Allocation
-    #while (supply > 0):
-        # DO_NOT_DEFER loads
+    while (supply > total_allocated and len(demands) > 0):
+        print "Supply available: ", supply
+        demands_left = []
+        demands.sort()
+        for demand_unit in demands: 
+            print "Checking ", demand_unit.id
+            
+            if demand_unit.id not in allocations:
+                allocations[demand_unit.id] = (demand_unit, -1)
+            (demand_unit, prev_allocation_level) = allocations[demand_unit.id]
+            print "Previous allocation level: ", prev_allocation_level
+            new_allocation_level = prev_allocation_level + 1
+            new_allocation_power = demand_unit.work[new_allocation_level].power
+
+            must_allocate = (demand_unit.cls == DemandClass.DO_NOT_DELAY and \
+                                prev_allocation_level == -1)
+            can_allocate = (supply >= new_allocation_power)
+            
+            if (must_allocate):
+                supply -= new_allocation_power
+                total_allocated += new_allocation_power 
+                allocations[demand_unit.id] = (demand_unit, new_allocation_level) 
+                if (new_allocation_level + 1 < len(demand_unit.work)):
+                    print "Placing back on demand queue: ", demand_unit
+                    heapq.heappush(demands_left, demand_unit)
+                print "Must allocate: ", demand_unit, " at level ", new_allocation_level
+            else:
+                if (can_allocate):
+                    supply -= new_allocation_power
+                    total_allocated += new_allocation_power 
+                    allocations[demand_unit.id] = (demand_unit, new_allocation_level)
+                    if (new_allocation_level + 1 < len(demand_unit.work)):
+                        print "Placing back on demand queue: ", demand_unit
+                        heapq.heappush(demands_left, demand_unit)
+                    print "Can allocate: ", demand_unit, " at level ", new_allocation_level
+        demands = demands_left
+    print "Done allocating."
+    return allocations, total_allocated
+
+def update_preallocated(preallocated, allocations, now):
+    for (demand_unit, work_level) in allocations.itervalues():
+        work_unit = demand_unit.work[work_level]
+        preallocated_power = work_unit.power
+        preallocated_time = work_unit.time
+        for t in range(now, now + preallocated_time + 2):
+            if t not in preallocated:
+                preallocated[t] = 0.0
+            preallocated[t] = preallocated[t] + work_unit.power
         
-    return allocations
+def update_loads(allocations, now):
+    for (demand_unit, work_level) in allocations.itervalues():
+        demand_unit.origin.update_demand_curve(demand_unit, work_level, now)
+
+def output(*strings):
+    if OUTPUT:
+        print(''.join(''.join([str(s), ', ']) for s in strings))
 
 def simulate(loads, supplies, end):
-
     done = False
     now = 0
 
@@ -134,30 +93,25 @@ def simulate(loads, supplies, end):
         current_supply = 0.0
         for supply in supplies:
             current_supply = current_supply + supply.supply(now)
-
-        # take away power that was already allocated
+        output("supply", now, current_supply)
         current_supply = current_supply - preallocated[now]
+        output("preallocated", now, preallocated[now])
 
         # get current loads
-        current_load = []
+        current_demand = []
         for load in loads:
-            current_load.add(load.load(now))
-        
-        # do allocations, return (load, watts)
-        allocations = allocate(current_loads, current_supply)
-        
-        # update preallocations for next time
-        for time in allocated.iterkeys():
-            if time in preallocated:
-                preallocated[time] = preallocated[time] + allocated[time].watts
-            else:
-                preallocated[time] = allocated[time].watts
-        
-        # update demand
-        for allocation in allocated.itervalues():
-            allocation.load.update_demand(allocation)
+            demands = load.demand(now)
+            for demand in demands:
+                heapq.heappush(current_demand, demand)
 
-        now = now + step
+        # allocated and update
+        allocations, total_allocated = allocate(current_demand, current_supply)
+        #print allocations
+        output("allocated", now, total_allocated)
+        update_preallocated(preallocated, allocations, now)
+        update_loads(allocations, now)
+
+        now = now + STEP
 
 if __name__ == "__main__":
 
@@ -166,11 +120,11 @@ if __name__ == "__main__":
     # later read in from configuration file
     # each supply / demand should be able to scale avg and max
 
-    a = DummyLoad('interactive', 10, _LoadInertia.VERYHIGH, _LoadIntensity.HIGH, _LoadMagnitude.LOW)
-    b = DummyLoad('interactive', 5, _LoadInertia.VERYLOW, _LoadIntensity.VERYHIGH, _LoadMagnitude.VERYLOW) 
-    c = DummyLoad('batch', 5, _LoadInertia.MED, _LoadIntensity.MED, _LoadMagnitude.MED)
-    d = DummyLoad('batch', 1, _LoadInertia.VERYHIGH, _LoadIntensity.VERYLOW, _LoadMagnitude.VERYHIGH)
-    e = DummyLoad('batch', 2, _LoadInertia.VERYLOW, _LoadIntensity.VERYHIGH, _LoadMagnitude.VERYLOW)
+    a = DummyLoad(0, 'interactive', 10, LoadInertia.VERYHIGH, LoadIntensity.HIGH, LoadMagnitude.LOW, levels=3)
+    b = DummyLoad(1, 'interactive', 5, LoadInertia.VERYLOW, LoadIntensity.VERYHIGH, LoadMagnitude.VERYLOW) 
+    c = DummyLoad(2, 'batch', 5, LoadInertia.MEDIUM, LoadIntensity.LOW, LoadMagnitude.MEDIUM, levels=3)
+    d = DummyLoad(3, 'batch', 1, LoadInertia.VERYHIGH, LoadIntensity.VERYLOW, LoadMagnitude.VERYHIGH, levels=4)
+    e = DummyLoad(4, 'batch', 2, LoadInertia.VERYLOW, LoadIntensity.MEDIUM, LoadMagnitude.VERYLOW)
 
     z = DummySupply()
 
